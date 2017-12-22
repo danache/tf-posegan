@@ -2,13 +2,12 @@
 from hg_models.layers.Residual import *
 
 class discrim():
-    def __init__(self, nFeat=256,  nModules=2, outputDim=14,npool=4,):
+    def __init__(self, nFeat=256,  nModules=2, outputDim=14):
 
 
         self.nFeats = nFeat
         self.nModules = nModules
         self.partnum = outputDim
-        self.npool = npool
 
     def hourglass(self,data, n, f, nModual, reuse=False, name=""):
 
@@ -68,24 +67,25 @@ class discrim():
             return bn1
 
     def createModel(self,inputs, reuse=False):
+        tl.layers.set_name_reuse(reuse)
+        data = tl.layers.InputLayer(inputs, name='discrim_model_input')
         with tf.variable_scope("discrim_model", reuse=reuse):
-            tl.layers.set_name_reuse(reuse)
-            data = tl.layers.InputLayer(inputs, name='input')
+
             conv1 = conv_2d(data, 64, filter_size=(3, 3), strides=(1, 1), padding='SAME', name="conv1")
             bn1 = tl.layers.BatchNormLayer(conv1, name="bn1", act=tf.nn.relu, )
-            r1 = Residual(bn1, 64, 128, name="Residual1", reuse=reuse)
+            r1 = Residual(bn1, 64, 128, name="discrim_model_Residual1", reuse=reuse)
 
 
-            r2 = Residual(r1, 128, 128, name="Residual2", reuse=reuse)
+            r2 = Residual(r1, 128, 128, name="discrim_model_Residual2", reuse=reuse)
 
-            r3 = Residual(r2, 128, self.nFeats, name="Residual3", reuse=reuse)
+            r3 = Residual(r2, 128, self.nFeats, name="discrim_model_Residual3", reuse=reuse)
 
         hg = [None]
 
         ll = [None]
         fc_out = [None]
         with tf.variable_scope('discrim_stage_0', reuse=reuse):
-            hg[0] = self.hourglass(r3, n=4, f=self.nFeats, nModual=self.nModules,name="stage_0_hg", reuse=reuse)
+            hg[0] = self.hourglass(r3, n=4, f=self.nFeats, nModual=self.nModules,name="dis_hg", reuse=reuse)
             residual = []
             for i in range(self.nModules):
                 if i == 0:
@@ -94,8 +94,8 @@ class discrim():
                     tmpres = Residual(residual[i - 1], self.nFeats, self.nFeats, name='tmpres_%d' % (i), reuse=reuse)
                 residual.append(tmpres)
 
-            ll[0] = self.lin( residual[-1], self.nFeats, name="stage_0_lin1" , reuse=reuse)
+            ll[0] = self.lin( residual[-1], self.nFeats, name="dis_stage_0_lin1" , reuse=reuse)
             fc_out[0] = conv_2d(ll[0], self.partnum, filter_size=(1, 1), strides=(1, 1),
-                             name="stage_0_out" )
+                             name="dis_crim_stage_0_out" )
 
         return fc_out[-1]

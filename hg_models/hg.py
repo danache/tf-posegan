@@ -4,16 +4,15 @@ from hg_models.layers.Residual import *
 
 
 class hgmodel():
-    def __init__(self, nFeat=256, nStack=4, nModules=2, outputDim=14,npool=4):
+    def __init__(self, nFeat=256, nStack=4, nModules=2, outputDim=14):
         self.nStack = nStack
         self.nFeats = nFeat
         self.nModules = nModules
         self.partnum = outputDim
-        self.npool = npool
+
 
     def hourglass(self,data, n, f, nModual, reuse=False, name=""):
 
-        # with mx.name.Prefix("%s_%s_" % (name, suffix)):
         with tf.variable_scope(name, reuse=reuse):
             pool = tl.layers.MaxPool2d(data, (2, 2), strides=(2, 2), name='pool1')
 
@@ -75,12 +74,12 @@ class hgmodel():
 
             conv1 = conv_2d(data, 64, filter_size=(7, 7), strides=(2, 2), padding='SAME', name="conv1")
             bn1 = tl.layers.BatchNormLayer(conv1, name="bn1", act=tf.nn.relu, )
-            r1 = Residual(bn1, 64, 128, name="Residual1", reuse=reuse)
+            r1 = Residual(bn1, 64, 128, name="hg_model_Residual1", reuse=reuse)
             pool = tl.layers.MaxPool2d(r1, (2, 2), strides=(2, 2), name="pool1")
 
-            r2 = Residual(pool, 128, 128, name="Residual2", reuse=reuse)
+            r2 = Residual(pool, 128, 128, name="hg_model_Residual2", reuse=reuse)
 
-            r3 = Residual(r2, 128, self.nFeats, name="Residual3", reuse=reuse)
+            r3 = Residual(r2, 128, self.nFeats, name="hg_model_Residual3", reuse=reuse)
 
 
 
@@ -170,7 +169,7 @@ class hgmodel():
                                                   name="stage_%d_out" % (self.nStack - 1))
                 out.append(fc_out[self.nStack - 1])
         # end = out[0]
-        end = tl.layers.StackLayer(out, axis=1, name='final_output')
+        end = tl.layers.StackLayer(out, axis=1, name='gfinal_output')
 
         return end
 
