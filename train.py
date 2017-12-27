@@ -45,7 +45,7 @@ dis = discrim()
 train_data = DataGenerator(imgdir=params['train_img_path'], nstack= network_params['nstack'],label_dir=params['label_dir'],
                                out_record=params['train_record'],num_txt=params['train_num_txt'],
                                batch_size=params['batch_size'], name="train_mini", is_aug=False,isvalid=False,scale=
-                               params['scale'],refine_num=10)
+                               params['scale'],refine_num=100)
 valid_data = DataGenerator(imgdir=params['valid_img_path'], nstack=network_params['nstack'],
                            label_dir=params['valid_label'],
                            out_record=params['valid_record'], num_txt=params['valid_num_txt'],
