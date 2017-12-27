@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-
+from tools.img_tf import *
 import numpy as np
 import tensorflow as tf
 import tensorlayer as tl
@@ -13,7 +13,7 @@ class train_class():
     def __init__(self, hgmodel,discrim, nstack=4, batch_size=32,learn_rate=2.5e-4, decay=0.96, decay_step=2000,gamma=0.5,
                  lambda_G=0.0001,lambda_K=0.001,
                  logdir_train="./log/train.log", logdir_valid="./log/test.log",
-                name='tiny_hourglass', train_record=None,valid_record=None,save_model_dir="",resume="",gpu=[0],
+                name='gan', train_record=None,valid_record=None,save_model_dir="",resume="",gpu=[0],
                  val_label="",train_label="",partnum=14,human_decay=0.96,val_batch_num=10000,beginepoch=0,weight_decay=1e-5
                  ):
         self.batch_size = batch_size
@@ -89,7 +89,8 @@ class train_class():
         generate_time = time.time()
         train_data = self.train_record
         self.train_num = train_data.getN()
-        train_img, train_mini, self.train_heatmap,self.train_size,self.train_name = train_data.getData()
+
+        train_img, train_mini, self.train_heatmap,self.train_center,self.train_scale,self.train_name = train_data.getData()
         train_for_discrim_gt = tf.concat( [train_mini, self.train_heatmap[:,-1,:]],axis=-1,)
         #self.train_output = self.model(train_img)
 
@@ -148,7 +149,7 @@ class train_class():
                                     # print(type(self.loss))
                                     tf.summary.scalar('discrim_gt_loss_%d' % (i), gt_loss, collections=['train'])
 
-                        hg_output = self.hgmodel.createModel(train_img,reuse=hg_flag).outputs
+                        self.hg_output = self.hgmodel.createModel(train_img,reuse=hg_flag).outputs
 
                         with tf.name_scope('train_heatmap'):
                             train_im = train_img[n, :, :, :]
@@ -160,7 +161,7 @@ class train_class():
                             tgt = []
 
                             for ooo in range(self.partnum):
-                                tmp = hg_output[n, self.nstack - 1, :, :, ooo]
+                                tmp = self.hg_output[n, self.nstack - 1, :, :, ooo]
                                 tout.append(tf.cast(tf.equal( tf.reduce_max(tmp), tmp),tf.float32))
                                 tmp2 = self.train_heatmap[n, self.nstack - 1, :, :, ooo]
                                 tgt.append(tf.cast(tf.equal( tf.reduce_max(tmp2), tmp2),tf.float32))
@@ -183,7 +184,7 @@ class train_class():
 
                         with tf.name_scope('hg_loss'):
                             with tf.device(self.cpu):
-                                hg_loss = tf.losses.mean_squared_error(labels=self.train_heatmap,predictions= hg_output)
+                                hg_loss = tf.losses.mean_squared_error(labels=self.train_heatmap,predictions=self.hg_output)
 
                                 with tf.name_scope('training'):
                                     # print(type(self.loss))
@@ -192,7 +193,7 @@ class train_class():
 
                         tf.get_variable_scope().reuse_variables()
 
-                        train_for_discrim_pre = tf.concat([train_mini, hg_output[:, -1, :]], axis=-1, )
+                        train_for_discrim_pre = tf.concat([train_mini, self.hg_output[:, -1, :]], axis=-1, )
 
                         discrim_pred_output = self.discriminator.createModel(inputs=train_for_discrim_pre, reuse=True).outputs
 
@@ -214,7 +215,7 @@ class train_class():
 
                         with tf.name_scope("hg_adv_loss"):
                             with tf.device(self.cpu):
-                                loss_adv = tf.losses.mean_squared_error(hg_output[:,-1,:],discrim_pred_output)
+                                loss_adv = tf.losses.mean_squared_error(self.hg_output[:,-1,:],discrim_pred_output)
                                 hg_all_loss = hg_loss + loss_adv
                                 self.hg_loss_list.append(hg_all_loss)
                                 with tf.name_scope('training'):
@@ -245,7 +246,8 @@ class train_class():
             tf.summary.scalar('K' , self.K, collections=['train'])
         if self.valid_record:
             valid_data = self.valid_record
-            valid_img, valid_ht,self.valid_size, self.valid_name = valid_data.getData()
+
+            valid_img, valid_mini, valid_ht,self.valid_center, self.valid_scale,self.valid_name = valid_data.getData()
             self.valid_num = valid_data.getN()
             self.validIter = int(self.valid_num / self.batch_size)
             self.valid_output = self.hgmodel.createModel(valid_img,reuse=True).outputs
@@ -286,6 +288,14 @@ class train_class():
 
             with tf.name_scope('MAE'):
                 tf.summary.scalar("MAE", self.mae, collections=['test'])
+
+        self.train_coord = reverseFromHt(self.hg_output, nstack=self.nstack, batch_size=self.batch_size,
+                                         num_joint=self.partnum,
+                                         scale=self.train_scale, center=self.train_center, res=[64, 64])
+
+        self.valid_coord = reverseFromHt(self.valid_output, nstack=self.nstack, batch_size=self.batch_size,
+                                         num_joint=self.partnum,
+                                         scale=self.valid_scale, center=self.valid_center, res=[64, 64])
 
         self.train_merged = tf.summary.merge_all('train')
         self.valid_merge = tf.summary.merge_all('test')
@@ -345,22 +355,21 @@ class train_class():
                 sys.stdout.flush()
 
                 if n_batch % showStep == 0:
-                    _,__,___,summary,last_lr= self.Session.run\
-                        ([self.apply_hg_grads_,self.apply_discrim_grads_,self.K,self.train_merged,self.lr],
+                    _,__,___,summary,last_lr,train_coord, train_name= self.Session.run\
+                        ([self.apply_hg_grads_,self.apply_discrim_grads_,self.K,self.train_merged,self.lr,self.train_coord,self.train_name],
                          feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
-                    train_out,train_size,train_name = self.Session.run([self.out_for_img,self.train_size,self.train_name])
 
-                    predictions = dict()
-                    predictions['image_ids'] = []
-                    predictions['annos'] = dict()
-                    predictions = getjointcoord(train_out, train_size, train_name, predictions)
+                    train_predictions = dict()
+                    train_predictions['image_ids'] = []
+                    train_predictions['annos'] = dict()
+                    train_predictions = getjointcoord(train_coord, train_name, train_predictions)
 
-                    return_dict = dict()
-                    return_dict['error'] = None
-                    return_dict['warning'] = []
-                    return_dict['score'] = None
-                    anno = load_annotations(self.train_label, return_dict)
-                    train_score = getScore(predictions, anno, return_dict)
+                    train_return_dict = dict()
+                    train_return_dict['error'] = None
+                    train_return_dict['warning'] = []
+                    train_return_dict['score'] = None
+                    train_anno = load_annotations(self.train_label, train_return_dict)
+                    train_score = getScore(train_predictions, train_anno, train_return_dict)
 
                     tmp = self.train_mae.assign(train_score)
                     _ = self.Session.run(tmp)
@@ -384,9 +393,10 @@ class train_class():
 
                         val_begin = time.time()
 
-                        predictions = dict()
-                        predictions['image_ids'] = []
-                        predictions['annos'] = dict()
+                        valid_predictions = dict()
+                        valid_predictions['image_ids'] = []
+                        valid_predictions['annos'] = dict()
+
                         val_begin_time = time.time()
 
                         for v in range(valid_iter):  # valid_iter
@@ -394,12 +404,12 @@ class train_class():
                             val_num = np.int(20 * val_percent / 100)
                             val_tToEpoch = int((time.time() - val_begin) * (100 - val_percent) / (val_percent))
 
-                            val_out, val_size, val_name,last_lr = self.Session.run(
-                                [ self.valid_output, self.valid_size, self.valid_name,self.lr],
-                                feed_dict={self.last_learning_rate: last_lr, self.h_decay: hm_decay})
+                            val_cord, val_name = self.Session.run(
+                                [self.valid_coord, self.valid_name, ]
+                            )
 
                             # print(np.array(accuracy_pred).shape)
-                            predictions = getjointcoord(val_out, val_size, val_name, predictions)
+                            valid_predictions = getjointcoord(val_cord, val_name, valid_predictions)
                             sys.stdout.write(
                                 '\r valid {0}>'.format("=" * val_num) + "{0}>".format(" " * (20 - val_num)) + '||' + str(percent)[
                                                                                                   :4][:4] +
@@ -407,7 +417,9 @@ class train_class():
                                 ' -timeToEnd: ' + str(val_tToEpoch) + ' sec.')
                             sys.stdout.flush()
                         print("val done in" + str(time.time() - val_begin_time))
-                        score = getScore(predictions, anno, return_dict)
+                        score = getScore(valid_predictions, anno, return_dict)
+                        tmp = self.mae.assign(score)
+                        _ = self.Session.run(tmp)
 
                         print("epoch %d, batch %d ,val score = %f" % (epoch, n_batch, score))
                         tmp = self.mae.assign(score)
@@ -440,7 +452,7 @@ class train_class():
             print('Epoch ' + str(epoch) + '/' + str(nEpochs) + ' done in ' + str(
                 int(epochfinishTime - epochstartTime)) + ' sec.' + ' -avg_time/batch: ' + str(
                 ((epochfinishTime - epochstartTime) / n_step_epoch))[:4] + ' sec.')
-            if epoch % 4 == 0:
+            if epoch % 1 == 0:
                 best_model_dir = os.path.join(self.save_dir, self.name + '_' + str(epoch))
                 print("epoch "+str(epoch)+", save at " + best_model_dir)
                 with tf.name_scope('save'):

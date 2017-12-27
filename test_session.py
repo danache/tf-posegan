@@ -10,7 +10,6 @@ import tensorflow as tf
 import pandas as pd
 import tensorlayer as tl
 from tools.img_tf import *
-
 class DataGenerator():
     def __init__(self, imgdir=None, label_dir=None, out_record=None, num_txt="", nstack=4, resize=256, scale=0.25,
                  flipping=False,
@@ -269,3 +268,35 @@ class DataGenerator():
 
         else:
             return img, label
+
+    def start(self):
+        crop_img, img_mini, heatmap, center, scale, img_name = self.getData()
+        self.sess = tf.Session()
+        init = tf.group(tf.global_variables_initializer(),
+                        tf.local_variables_initializer())
+
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord, sess=self.sess)
+
+        self.sess.run(init)
+        for i in range(1):
+            a,b,c,d,e,f = self.sess.run([crop_img, img_mini,heatmap, center, scale, img_name])
+        print(f)
+        coord.request_stop()
+        #
+        #     # Wait for threads to finish.
+        coord.join(threads)
+        self.sess.close()
+
+
+
+test = DataGenerator(imgdir="/media/bnrc2/_backup/ai/ai_challenger_keypoint_train_20170902/keypoint_train_images_20170902/", nstack= 2,label_dir="/media/bnrc2/_backup/ai/ai_challenger_keypoint_train_20170902/keypoint_train_annotations_20170909.json",
+                               out_record="/media/bnrc2/_backup/dataset/new_tfrecord/valid/",num_txt="/media/bnrc2/_backup/dataset/new_tfrecord/new_valid.txt",
+                               batch_size=8, name="train_mini", is_aug=False,isvalid=False)
+
+
+test.start()
+
+
+
+
