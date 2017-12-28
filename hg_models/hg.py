@@ -123,18 +123,19 @@ class hgmodel():
             for i in range(1, self.nStack - 1):
                 with tf.variable_scope('stage_%d' % (i)):
 
-                    hg[i] = self.hourglass(sum_[i - 1], n=4, f=self.nFeats, nModual=self.nModules,name="stage_%d_hg" % (i), reuse=reuse)
+                    hg[i] = self.hourglass(sum_[i - 1], n=4, f=self.nFeats, nModual=self.nModules,
+name="stage_%d_hg" % (i), reuse=reuse)
 
-                    resid["stage_%d"%i] = []
+                    resid["stage_%d" % i] = []
                     for j in range(self.nModules):
                         if j == 0:
                             tmpres = Residual(hg[i], self.nFeats, self.nFeats, name='stage_%d_tmpres_%d' % (i,j),
                                               reuse=reuse)
                         else:
-                            tmpres = Residual(resid["stage_%d"%i][j - 1], self.nFeats, self.nFeats,
+                            tmpres = Residual(resid["stage_%d" % i][j - 1], self.nFeats, self.nFeats,
                                               name='stage_%d_tmpres_%d' % (i, j),
                                               reuse=reuse)
-                        resid["stage_%d"%i].append(tmpres)
+                        resid["stage_%d" % i].append(tmpres)
 
                     ll[i] = self.lin(resid["stage_%d"%i][-1], self.nFeats, name="stage_%d_lin" % (i), reuse=reuse)
                     fc_out[i] = conv_2d(ll[i], self.partnum, filter_size=(1, 1), strides=(1, 1),
@@ -154,7 +155,8 @@ class hgmodel():
                 residual = []
                 for j in range(self.nModules):
                     if j == 0:
-                        tmpres = Residual(hg[self.nStack - 1], self.nFeats, self.nFeats, name='stage_%d_tmpres_%d' % (self.nStack - 1, j),
+                        tmpres = Residual(hg[self.nStack - 1], self.nFeats, self.nFeats,
+                                          name='stage_%d_tmpres_%d' % (self.nStack - 1, j),
                                           reuse=reuse)
                     else:
                         tmpres = Residual(residual[j - 1], self.nFeats, self.nFeats,

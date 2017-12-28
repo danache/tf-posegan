@@ -89,10 +89,15 @@ class train_class():
         generate_time = time.time()
         train_data = self.train_record
         self.train_num = train_data.getN()
+        self.train_img_lst = []
+        self.train_img_mini_lst = []
+        self.train_heatmap_lst = []
+        self.train_center_lst = []
+        self.train_scale_lst = []
+        self.train_name_lst = []
 
-        train_img, train_mini, self.train_heatmap,self.train_center,self.train_scale,self.train_name = train_data.getData()
-        train_for_discrim_gt = tf.concat( [train_mini, self.train_heatmap[:,-1,:]],axis=-1,)
-        #self.train_output = self.model(train_img)
+
+
 
         self.h_decay = tf.Variable(1.,  trainable=False,dtype=tf.float32,)
 
@@ -102,7 +107,8 @@ class train_class():
         print('train data generate in ' + str(int(generate_train_done_time - generate_time)) + ' sec.')
         print("train num is %d" % (self.train_num))
         self.global_step = 0
-
+        shuff = tf.random_shuffle(tf.constant(np.arange(0, self.nstack)))
+        n = tf.cast(shuff[0], tf.int32)
 
         with tf.name_scope('lr'):
             # self.lr = tf.train.exponential_decay(self.learn_r, self.train_step, self.lr_decay_step,
@@ -113,46 +119,55 @@ class train_class():
 
 
         self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr)
-        #self.optimizer_D = tf.train.RMSPropOptimizer(learning_rate=8e-5)
+        self.optimizer_D = tf.train.RMSPropOptimizer(learning_rate=8e-5)
         dis_flag = False
         hg_flag = False
         self.K = tf.Variable(0., trainable=False, dtype=tf.float32, )
-        #### loss dict
-
+        #### loss lst
         self.discrim_loss_list = []
-
         self.discrim_gt_loss_list= []
         self.discrim_pred_loss_list = []
-
-
         self.hg_loss_list = []
-
-        #### grad dict
+        self.hg_loss_single_list = []
+        #### grad lst
         self.discrim_grads_list = []
         self.hg_grads_list = []
-        shuff = tf.random_shuffle(tf.constant(np.arange(0, self.nstack)))
-        n = tf.cast(shuff[0], tf.int32)
+        #### Variable lst
+        self.discrim_gt_output_lst = []
+        self.hg_output_lst = []
+        self.train_for_discrim_pre_lst = []
 
+        self.train_mini_discrim_lst = []
         with tf.variable_scope(tf.get_variable_scope()) as vscope:
             for i in self.gpu:
                 with tf.device(("/gpu:%d" % i)):
                     with tf.name_scope('gpu_%d' % ( i)) as scope:
+                        train_img, train_mini, train_heatmap, train_center, train_scale, train_name = train_data.getData()
+                        self.train_img_lst.append(train_img)
+                        self.train_img_mini_lst.append(train_mini)
+                        self.train_center_lst.append(train_center)
+                        self.train_scale_lst.append(train_scale)
+                        self.train_name_lst.append(train_name)
+                        self.train_heatmap_lst.append(train_heatmap)
 
-                        discrim_gt_output = self.discriminator.createModel(inputs=train_for_discrim_gt,reuse=dis_flag).outputs
 
-                        dis_flag = True
-                        with tf.name_scope('discrim_gt_loss'):
-                            with tf.device(self.cpu):
-                                gt_loss = tf.losses.mean_squared_error(labels=self.train_heatmap[:,-1,:] ,predictions=discrim_gt_output)
-                                self.discrim_gt_loss_list.append(gt_loss)
-                                with tf.name_scope('training'):
-                                    # print(type(self.loss))
-                                    tf.summary.scalar('discrim_gt_loss_%d' % (i), gt_loss, collections=['train'])
+                        # self.train_mini_discrim_lst.append(tf.concat([self.train_heatmap_lst[i][:, -1, :], self.train_img_mini_lst[i]], axis=-1, ))
+                        # self.discrim_gt_output_lst.append(self.discriminator.createModel(inputs=self.train_mini_discrim_lst[i],
+                        #                                                                  reuse=dis_flag).outputs)
+                        #
+                        # dis_flag = True
+                        # with tf.name_scope('discrim_gt_loss'):
+                        #     with tf.device(self.cpu):
+                        #         gt_loss = tf.losses.mean_squared_error(labels=self.train_heatmap_lst[i][:,-1,:] ,predictions=self.discrim_gt_output_lst[i])
+                        #         self.discrim_gt_loss_list.append(gt_loss)
+                        #         with tf.name_scope('training'):
+                        #             # print(type(self.loss))
+                        #             tf.summary.scalar('discrim_gt_loss_%d' % (i), self.discrim_gt_loss_list[i], collections=['train'])
 
-                        self.hg_output = self.hgmodel.createModel(train_img,reuse=hg_flag).outputs
+                        self.hg_output_lst.append(self.hgmodel.createModel(self.train_img_lst[i],reuse=hg_flag).outputs)
 
                         with tf.name_scope('train_heatmap'):
-                            train_im = train_img[n, :, :, :]
+                            train_im = self.train_img_lst[i][n, :, :, :]
                             train_im = tf.expand_dims(train_im, 0)
 
                             tf.summary.image(name=('origin_train_img'), tensor=train_im, collections=['train'])
@@ -161,9 +176,22 @@ class train_class():
                             tgt = []
 
                             for ooo in range(self.partnum):
-                                tmp = self.hg_output[n, self.nstack - 1, :, :, ooo]
+                                hm = self.hg_output_lst[i][n, self.nstack - 1, :, :, ooo]
+                                hm = tf.expand_dims(hm, -1)
+                                hm = tf.expand_dims(hm, 0)
+                                hm = hm * 255
+                                gt = self.train_heatmap_lst[i][n, self.nstack - 1, :, :, ooo]
+
+                                gt = tf.expand_dims(gt, -1)
+                                gt = tf.expand_dims(gt, 0)
+                                gt = gt * 255
+                                tf.summary.image('ground_truth_%s_%d' % (self.joints[ooo], i), tensor=gt,
+                                                 collections=['train'])
+                                tf.summary.image('heatmp_%s_%d' % (self.joints[ooo], i), hm, collections=['train'])
+
+                                tmp = self.hg_output_lst[i][n, self.nstack - 1, :, :, ooo]
                                 tout.append(tf.cast(tf.equal( tf.reduce_max(tmp), tmp),tf.float32))
-                                tmp2 = self.train_heatmap[n, self.nstack - 1, :, :, ooo]
+                                tmp2 = self.train_heatmap_lst[i][n, self.nstack - 1, :, :, ooo]
                                 tgt.append(tf.cast(tf.equal( tf.reduce_max(tmp2), tmp2),tf.float32))
 
                             train_gt = tf.add_n(tgt)
@@ -177,73 +205,77 @@ class train_class():
                             tf.summary.image('train_ground_truth', tensor=train_gt, collections=['train'])
                             tf.summary.image('train_heatmp', train_hm, collections=['train'])
 
-
-
-
                         hg_flag = True
 
                         with tf.name_scope('hg_loss'):
                             with tf.device(self.cpu):
-                                hg_loss = tf.losses.mean_squared_error(labels=self.train_heatmap,predictions=self.hg_output)
-
+                                self.hg_loss_single_list.append(tf.losses.mean_squared_error(labels=self.train_heatmap_lst[i],
+                                                                                             predictions=self.hg_output_lst[i]))
                                 with tf.name_scope('training'):
                                     # print(type(self.loss))
-                                    tf.summary.scalar('hg_loss_%d' % (i), hg_loss, collections=['train'])
+                                    tf.summary.scalar('hg_loss_%d' % (i), self.hg_loss_single_list[i], collections=['train'])
+
+                        #
+                        # tf.get_variable_scope().reuse_variables()
+                        #
+                        # self.train_for_discrim_pre_lst.append(tf.concat([self.hg_output_lst[i][:, -1, :],self.train_img_mini_lst[i]], axis=-1,) )
+                        #
+                        # discrim_pred_output = self.discriminator.createModel(inputs=self.train_for_discrim_pre_lst[i], reuse=True)\
+                        #     .outputs
+                        #
+                        # with tf.name_scope('discrim_pred_loss'):
+                        #     with tf.device(self.cpu):
+                        #         pred_loss = tf.losses.mean_squared_error(labels= self.train_heatmap_lst[i][:,-1,:] ,predictions=discrim_pred_output)
+                        #         with tf.name_scope('training'):
+                        #             # print(type(self.loss))
+                        #             tf.summary.scalar('discrim_pred_loss_%d' % (i), pred_loss, collections=['train'])
+                        #
+                        #
+                        # with tf.name_scope("discrim_all_loss"):
+                        #     with tf.device(self.cpu):
+                        #         all_loss = tf.subtract(pred_loss ,tf.multiply(self.K , gt_loss))
+                        #         self.discrim_loss_list.append(all_loss)
+                        #         with tf.name_scope('training'):
+                        #             # print(type(self.loss))
+                        #             tf.summary.scalar('crmi_all_loss_%d' % (i), all_loss, collections=['train'])
+                        #
+                        # with tf.name_scope("hg_adv_loss"):
+                        #     with tf.device(self.cpu):
+                        #         loss_adv = tf.losses.mean_squared_error(self.hg_output_lst[i][:,-1,:],discrim_pred_output)
+                        #         hg_all_loss =self.hg_loss_single_list[i] + loss_adv
+                        #         self.hg_loss_list.append(hg_all_loss)
+                        #         with tf.name_scope('training'):
+                        #             # print(type(self.loss))
+                        #             tf.summary.scalar('hg_all_loss_%d' % (i),  hg_all_loss, collections=['train'])
+                        #
+                        # hg_grads = self.optimizer.compute_gradients(loss=self.hg_loss_list[i])
+                        # discrim_grads = self.optimizer.compute_gradients(loss=self.discrim_loss_list[i])
+                        #
+                        # self.discrim_grads_list.append(discrim_grads)
+                        # self.hg_grads_list.append(hg_grads)
 
 
-                        tf.get_variable_scope().reuse_variables()
 
-                        train_for_discrim_pre = tf.concat([train_mini, self.hg_output[:, -1, :]], axis=-1, )
-
-                        discrim_pred_output = self.discriminator.createModel(inputs=train_for_discrim_pre, reuse=True).outputs
-
-                        with tf.name_scope('discrim_pred_loss'):
-                            with tf.device(self.cpu):
-                                pred_loss = tf.losses.mean_squared_error(labels= self.train_heatmap[:,-1,:] ,predictions=discrim_pred_output)
-                                with tf.name_scope('training'):
-                                    # print(type(self.loss))
-                                    tf.summary.scalar('discrim_pred_loss_%d' % (i), pred_loss, collections=['train'])
-
-
-                        with tf.name_scope("discrim_all_loss"):
-                            with tf.device(self.cpu):
-                                all_loss = tf.subtract(pred_loss ,tf.multiply(self.K , gt_loss))
-                                self.discrim_loss_list.append(all_loss)
-                                with tf.name_scope('training'):
-                                    # print(type(self.loss))
-                                    tf.summary.scalar('crmi_all_loss_%d' % (i), all_loss, collections=['train'])
-
-                        with tf.name_scope("hg_adv_loss"):
-                            with tf.device(self.cpu):
-                                loss_adv = tf.losses.mean_squared_error(self.hg_output[:,-1,:],discrim_pred_output)
-                                hg_all_loss = hg_loss + loss_adv
-                                self.hg_loss_list.append(hg_all_loss)
-                                with tf.name_scope('training'):
-                                    # print(type(self.loss))
-                                    tf.summary.scalar('hg_all_loss_%d' % (i),  hg_all_loss, collections=['train'])
-
-                        hg_grads = self.optimizer.compute_gradients(loss=self.hg_loss_list[i])
-                        discrim_grads = self.optimizer.compute_gradients(loss=self.discrim_loss_list[i])
-
-                        self.discrim_grads_list.append(discrim_grads)
+                        hg_grads = self.optimizer.compute_gradients(loss=self.hg_loss_single_list[i])
                         self.hg_grads_list.append(hg_grads)
 
 
+
+
         hg_grads_ = self.average_gradients(self.hg_grads_list)
-        discrim_grads_ = self.average_gradients(self.discrim_grads_list)
-        self.out_for_img = self.hgmodel.createModel(train_img,reuse=True).outputs
+        #discrim_grads_ = self.average_gradients(self.discrim_grads_list)
         ###梯度下降
         self.apply_hg_grads_ = self.optimizer.apply_gradients(hg_grads_)
-        self.apply_discrim_grads_ = self.optimizer.apply_gradients(discrim_grads_)
-        ###更新K值
-        errD_real = tf.reduce_mean(tf.stack(self.discrim_gt_loss_list,axis=0))
-        err_G2 =  tf.reduce_mean(tf.stack(self.discrim_pred_loss_list,axis=0))
-        balance = tf.subtract(self.gamma * errD_real , err_G2 / self.lambda_G)
-        self.K = tf.add(self.K , self.lambda_k * balance)
-        self.K = tf.maximum(tf.minimum(1., self.K), 0.)
-        with tf.name_scope('training'):
-            # print(type(self.loss))
-            tf.summary.scalar('K' , self.K, collections=['train'])
+        # #self.apply_discrim_grads_ = self.optimizer_D.apply_gradients(discrim_grads_)
+        # ###更新K值
+        # errD_real = tf.reduce_mean(tf.stack(self.discrim_gt_loss_list,axis=0))
+        # err_G2 =  tf.reduce_mean(tf.stack(self.discrim_pred_loss_list,axis=0))
+        # balance = tf.subtract(self.gamma * errD_real , err_G2 / self.lambda_G)
+        #
+        # self.update_K = self.K.assign(tf.maximum(tf.minimum(1.,  tf.add(self.K , self.lambda_k * balance)), 0.))
+        # with tf.name_scope('training'):
+        #     # print(type(self.loss))
+        #     tf.summary.scalar('K' , self.K, collections=['train'])
         if self.valid_record:
             valid_data = self.valid_record
 
@@ -265,6 +297,12 @@ class train_class():
                 vout = []
                 vgt = []
                 for i in range(self.partnum):
+                    hm = self.valid_output[n, self.nstack - 1, :,:,i]
+                    hm = tf.expand_dims(hm, -1)
+                    hm = tf.expand_dims(hm, 0)
+                    hm = hm * 255
+                    tf.summary.image('heatmp_%s_%d' % (self.joints[i], i), hm, collections=['test'])
+
                     vout.append(self.valid_output[n, self.nstack - 1, :,:,i])
                     vgt.append(valid_ht[n, self.nstack - 1,:,:, i])
                 val_hm = tf.add_n(vout)
@@ -289,9 +327,9 @@ class train_class():
             with tf.name_scope('MAE'):
                 tf.summary.scalar("MAE", self.mae, collections=['test'])
 
-        self.train_coord = reverseFromHt(self.hg_output, nstack=self.nstack, batch_size=self.batch_size,
+        self.train_coord = reverseFromHt(self.hg_output_lst[0], nstack=self.nstack, batch_size=self.batch_size,
                                          num_joint=self.partnum,
-                                         scale=self.train_scale, center=self.train_center, res=[64, 64])
+                                         scale=self.train_scale_lst[0], center=self.train_center_lst[0], res=[64, 64])
 
         self.valid_coord = reverseFromHt(self.valid_output, nstack=self.nstack, batch_size=self.batch_size,
                                          num_joint=self.partnum,
@@ -334,6 +372,8 @@ class train_class():
         last_lr = self.learn_r
         hm_decay = 1
         best_val = -1
+
+        valStep = min(valStep, n_step_epoch - 100)
         if self.valid_record:
             valid_iter = int(self.val_batch_num / self.batch_size)
         for epoch in range(self.beginepoch, nEpochs):
@@ -355,9 +395,14 @@ class train_class():
                 sys.stdout.flush()
 
                 if n_batch % showStep == 0:
-                    _,__,___,summary,last_lr,train_coord, train_name= self.Session.run\
-                        ([self.apply_hg_grads_,self.apply_discrim_grads_,self.K,self.train_merged,self.lr,self.train_coord,self.train_name],
-                         feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
+                    # _,__,___,summary,last_lr,train_coord, train_name= self.Session.run\
+                        # ([self.apply_hg_grads_,self.apply_discrim_grads_,self.update_K ,self.train_merged,self.lr,self.train_coord,self.train_name_lst[0]],
+                        #  feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
+
+
+                    _, summary, last_lr, train_coord, train_name = self.Session.run \
+                        ([self.apply_hg_grads_, self.train_merged,self.lr,self.train_coord,self.train_name_lst[0]],
+                     feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
 
                     train_predictions = dict()
                     train_predictions['image_ids'] = []
@@ -378,8 +423,12 @@ class train_class():
                     self.train_writer.flush()
 
                 else:
-                    _, __, ___,last_lr = self.Session.run([self.apply_hg_grads_,self.apply_discrim_grads_,self.K, self.lr],
-                                             feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
+                    # _, __, ___,last_lr = self.Session.run([self.apply_hg_grads_,self.apply_discrim_grads_,self.update_K , self.lr],
+                    #                          feed_dict={self.last_learning_rate : last_lr, self.h_decay:hm_decay})
+
+                    _, last_lr = self.Session.run(
+                        [self.apply_hg_grads_, self.lr],
+                        feed_dict={self.last_learning_rate: last_lr, self.h_decay: hm_decay})
                 #
                 hm_decay = 1.
                 if (n_batch+1) % valStep == 0:
@@ -432,12 +481,12 @@ class train_class():
                             with tf.name_scope('save'):
                                 self.saver.save(self.Session, best_model_dir)
                             hm_decay = 1.
-
+                        '''
                         else:
                             #print("now val loss is not best, restore model from" + best_model_dir)
                             #self.saver.restore(self.Session, best_model_dir)
                             hm_decay = self.human_decay
-
+                        '''
                         valid_summary = self.Session.run([self.valid_merge])
 
                         self.valid_writer.add_summary(valid_summary[0], epoch * n_step_epoch + n_batch)
