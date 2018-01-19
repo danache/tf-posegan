@@ -82,7 +82,6 @@ class hgmodel():
             r3 = Residual(r2, 128, self.nFeats, name="hg_model_Residual3", reuse=reuse)
 
 
-
         hg = [None] * self.nStack
 
         ll = [None] * self.nStack
@@ -110,7 +109,7 @@ class hgmodel():
             ll[0] = self.lin(resid["stage_0"][-1], self.nFeats, name="stage_0_lin1", reuse=reuse)
             fc_out[0] = conv_2d(ll[0], self.partnum, filter_size=(1, 1), strides=(1, 1),
                                 name="stage_0_out")
-            out.append(fc_out[0])
+            out.append(fc_out[0].outputs)
             if self.nStack > 1:
                 c_1[0] = conv_2d(ll[0], self.nFeats, filter_size=(1, 1), strides=(1, 1),
                                  name="stage_0_conv1")
@@ -140,7 +139,7 @@ name="stage_%d_hg" % (i), reuse=reuse)
                     ll[i] = self.lin(resid["stage_%d"%i][-1], self.nFeats, name="stage_%d_lin" % (i), reuse=reuse)
                     fc_out[i] = conv_2d(ll[i], self.partnum, filter_size=(1, 1), strides=(1, 1),
                                         name="stage_%d_out" % (i))
-                    out.append(fc_out[i])
+                    out.append(fc_out[i].outputs)
 
                     c_1[i] = conv_2d(ll[i], self.nFeats, filter_size=(1, 1), strides=(1, 1),
                                      name="stage_%d_conv1" % (i))
@@ -169,9 +168,9 @@ name="stage_%d_hg" % (i), reuse=reuse)
                 fc_out[self.nStack - 1] = conv_2d(ll[self.nStack - 1], self.partnum, filter_size=(1, 1),
                                                   strides=(1, 1),
                                                   name="stage_%d_out" % (self.nStack - 1))
-                out.append(fc_out[self.nStack - 1])
+                out.append(fc_out[self.nStack - 1].outputs)
         # end = out[0]
-        end = tl.layers.StackLayer(out, axis=1, name='gfinal_output')
+        #end = tl.layers.StackLayer(out, axis=1, name='gfinal_output')
 
-        return end
+        return out
 

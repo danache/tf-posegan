@@ -1,290 +1,288 @@
 import numpy as np
 # import cv2
 import os
-import matplotlib.pyplot as plt
 import random
-import time
-from skimage import transform
 import scipy.misc as scm
+import scipy
+import cv2
 import tensorflow as tf
-import pandas as pd
-import tensorlayer as tl
-from tools.img_tf import *
-
+import scipy
 class DataGenerator():
-    def __init__(self, imgdir=None, label_dir=None, out_record=None, num_txt="", nstack=4, resize=256, scale=0.25,
-                 flipping=False,
-                 color_jitting=30, rotate=30, batch_size=32, name="", is_aug=True, isvalid=False, refine_num=None):
-        self.nstack = nstack
-        self.imgdir = imgdir
+    def __init__(self, imgdir=None, txt=None,  resize=256, scale=0.25,normalize=True,flipping=False,color_jitting=30,
+                 rotate=30, batch_size=32,  is_aug=False,randomize=True,joints_name=None,datasetname="train",isTraing=True):
+
+        self.joints_name = joints_name
+        self.letter = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
+        self.img_dir = imgdir
+        self.train_data_file = txt
+        self.images = os.listdir(imgdir)
+        self.israndom = randomize
+        self.name = datasetname
+        self.normalize = normalize
+        self.batch_size = batch_size
+        self.joints_name = joints_name
         if is_aug:
             self.flipping = flipping
             self.color_jitting = color_jitting
             self.rotate = rotate
         else:
-
             self.flipping = False
             self.color_jitting = False
             self.rotate = False
-        self.num_txt = num_txt
-        self.scale = scale
-        self.isvalid = isvalid
-        self.resize = resize
-        self.batch_size = batch_size
-        self.name = name
-        self.refine_num = refine_num
-        if self.refine_num:
-            print("max num is " + str(refine_num))
-        if os.path.isdir(out_record):
-            print(out_record)
-            print("record file exist!!")
-            self.record_path = out_record
-            txt = open(num_txt, "r")
+        self.resize = [resize,resize]
+        self.res = [64,64]
+        self.isTrainging = isTraing
+        self.creatset()
 
-            for line in txt.readlines():
-                self.number = int(line.strip())
+    def load_data(self):
+        self.train_table = []
+        self.no_intel = []
+        self.data_dict = {}
+        input_file = open(self.train_data_file, 'r')
+        print('READING TRAIN DATA')
+        for line in input_file:
+            line = line.strip()
+            line = line.split(' ')
+            name = line[0]
+            box = list(map(int, line[1:5]))
+            joints = list(map(int, line[5:]))
+            if joints == [-1] * len(joints):
+                self.no_intel.append(name)
+            else:
+                joints = np.reshape(joints, (-1, 2))
+                w = [1] * joints.shape[0]
+                for i in range(joints.shape[0]):
+                    if np.array_equal(joints[i], [-1, -1]):
+                        w[i] = 0
+                self.data_dict[name] = {'box': box, 'joints': joints, 'weights': w}
+                self.train_table.append(name)
+        input_file.close()
 
-        else:
-            print(self.name + "record file not exist!  creating !!!")
-            os.mkdir(out_record)
-            self.generageRecord(imgdir, label_dir, out_record, extension=self.scale, resize=256)
-            self.record_path = out_record
+    def _randomize(self):
+        """ Randomize the set
+        """
+        random.shuffle(self.train_table)
 
-    def getData(self):
-        return self.read_and_decode(filepath =self.record_path, flipping=self.flipping,
-                                    color_jitting=self.color_jitting, rotate=self.rotate, batch_size=self.batch_size,
-                                    isvalid=self.isvalid,root_img=self.imgdir)
+    def creatset(self):
+        self.load_data()
+        if self.israndom:
+            self._randomize()
+        self.dataset = self.train_table
+        print('SET CREATED')
+        np.save('Dataset% s'%self.name, self.dataset)
+        print('--Training set :', len(self.dataset), ' samples.')
 
+    def open_img(self, name, color='RGB'):
+        """ Open an image
+        Args:
+            name	: Name of the sample
+            color	: Color Mode (RGB/BGR/GRAY)
+        """
+        if name[-1] in self.letter:
+            name = name[:-1]
+
+        img_name =os.path.join(self.img_dir, name)
+        img = scipy.misc.imread(img_name)
+        return img
+        # if color == 'RGB':
+        #     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        #     return img
+        # elif color == 'BGR':
+        #     return img
+        # elif color == 'GRAY':
+        #     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # else:
+        #     print('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
+
+    def get_transform(self,center, scale, res, rot=0):
+        # Generate transformation matrix
+        h = scale
+        t = np.zeros((3, 3))
+        t[0, 0] = float(res[1]) / (h[1])
+        t[1, 1] = float(res[0]) / (h[0])
+        t[0, 2] = res[1] * (-float(center[0]) / h[1] + .5)
+        t[1, 2] = res[0] * (-float(center[1]) / h[0] + .5)
+        t[2, 2] = 1
+        return t
     def getN(self):
-        return self.number
+        return len(self.dataset)
+    def transform(self,pt, center, scale, res, invert=0, rot=0):
+        # Transform pixel location to different reference
+        t = self.get_transform(center, scale, res, rot=rot)
+        if invert:
+            t = np.linalg.inv(t)
+        new_pt = np.array([pt[0], pt[1], 1.]).T
+        new_pt = np.dot(t, new_pt)
+        return new_pt[:2].astype(int)
 
-    def _bytes_feature(self, value):
-        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+    def transformPreds(self,coords, center, scale, res, reverse=0):
+        #     local origDims = coords:size()
+        #     coords = coords:view(-1,2)
+        lst = []
 
-    # def augment(self,):
-    #     #包括resize to size, scaling ,fliping, color jitting, rotate,
+        for i in range(coords.shape[0]):
+            lst.append(self.transform(coords[i], center, scale, res, reverse, 0, ))
 
-    def generageRecord(self, imgdir, label_tmp, out_record, extension=0.3, resize=256):
+        newCoords = np.stack(lst, axis=0)
 
-        self.number = 0
-        label_tmp = pd.read_json(label_tmp)
-        for index, row in label_tmp.iterrows():
-            anno = row["human_annotations"]
-            #         if(len(anno.keys())  == 1):
-            #             continue
-            img_path = os.path.join(imgdir, row["image_id"] + ".jpg")
+        return newCoords
 
-            img = scm.imread(img_path)
+    def crop(self,img, center, scale, res):
 
-            w, h = img.shape[1], img.shape[0]
-            keypoint = row["keypoint_annotations"]
-            i = 0
-            fileName = ("%.6d.tfrecords" % (index))
-            writer = tf.python_io.TFRecordWriter(os.path.join(out_record,fileName))
+        ul = np.array(self.transform([0, 0], center, scale, res, invert=1))
 
-            for key in anno.keys():
-                i += 1
-                if (anno[key][0] >= anno[key][2] or anno[key][1] >= anno[key][3]):
-                    print(img_path)
-                    continue
+        br = np.array(self.transform(res, center, scale, res, invert=1))
 
-                x1, y1, x2, y2 = anno[key][0], anno[key][1], anno[key][2], anno[key][3]
+        old_x = max(0, ul[0]), min(len(img[0]), br[0])
+        old_y = max(0, ul[1]), min(len(img), br[1])
+        new_img = img[old_y[0]:old_y[1], old_x[0]:old_x[1]]
 
-                board_w = x2 - x1
-                board_h = y2 - y1
-                center = np.array(((x1 + x2) * 0.5, (y1 + y2) * 0.5))
-                ankle = keypoint[key].copy()
+        return scipy.misc.imresize(new_img, res)
+    def getFeature(self, box):
+        x1,y1,x2,y2 = box
+        center = np.array(((x1 + x2) * 0.5, (y1 + y2) * 0.5))
+        scale = y2 - y1, x2 - x1
+        return center, scale
 
 
-                feature = {
-                    'label': self._bytes_feature(tf.compat.as_bytes(np.array(ankle).astype(np.int32).tostring())),
-                    'center': self._bytes_feature(tf.compat.as_bytes(center.astype(np.float32).tostring())),
-                    'h': tf.train.Feature(int64_list=tf.train.Int64List(value=[h])),
-                    'w': tf.train.Feature(int64_list=tf.train.Int64List(value=[w])),
-                    'bh': tf.train.Feature(int64_list=tf.train.Int64List(value=[board_h])),
-                    'bw': tf.train.Feature(int64_list=tf.train.Int64List(value=[board_w])),
-                    'img_name': self._bytes_feature(tf.compat.as_bytes(img_path)),
-                }
-
-                example = tf.train.Example(features=tf.train.Features(feature=feature))
-                writer.write(example.SerializeToString())
-                self.number += 1
-            writer.close()
-            if index % 100 == 0:
-                print("creating -- %d" % (index))
-            if self.refine_num:
-                if index > self.refine_num:
-                    break
-
-        txt = open(self.num_txt, "w")
-        txt.write(str(self.number))
-        txt.close()
-        return None
-
-    def _makeGaussian(self, height, width, sigma=3., center=None, flag=True):
+    def recoverFromHm(self, hm,center,scale):
+        res = []
+        for nbatch in range(hm.shape[0]):
+            tmp_lst = []
+            for i in range(hm.shape[-1]):
+                index = np.unravel_index(hm[nbatch, :, :, i].argmax(), self.res)
+                tmp_lst.append(index[::-1])
+            res.append(self.transformPreds(np.stack(tmp_lst), center[nbatch], scale[nbatch], self.res, reverse=1))
+        return np.stack(res)
+    def _makeGaussian(self, height, width, sigma=3, center=None):
         """ Make a square gaussian kernel.
         size is the length of a side of the square
         sigma is full-width-half-maximum, which
         can be thought of as an effective radius.
         """
-        x = tf.range(0., width, 1.)
-        y = tf.range(0., height, 1.)[:, tf.newaxis]
+        x = np.arange(0, width, 1, float)
+        y = np.arange(0, height, 1, float)[:, np.newaxis]
         if center is None:
-
             x0 = width // 2
             y0 = height // 2
         else:
-
             x0 = center[0]
             y0 = center[1]
+        return np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / sigma ** 2)
 
-        x = tf.cast(x, tf.float32)
-        y = tf.cast(y, tf.float32)
-        x0 = tf.cast(x0, tf.float32)
-        y0 = tf.cast(y0, tf.float32)
-
-        dx = tf.pow(tf.subtract(x, x0), 2)
-        dy = tf.pow(tf.subtract(y, y0), 2)
-        fenzi = tf.multiply(tf.multiply(tf.add(dx, dy), tf.log(2.)), -4.0)
-        fenmu = tf.cast(tf.pow(sigma, 2), tf.float32)
-        dv = tf.divide(fenzi, fenmu)
-        return tf.exp(dv)
-
-    def planB(self, height, width):
-        return tf.zeros((height, width))
-
-    def generateHeatMap(self, height, width, joints, num_joints, maxlenght):
-
-        hm = []
-        coord = []
-        for i in range(int(num_joints)):
-            tmp = (tf.sqrt(maxlenght) * maxlenght * 10 / 4096.) + 2
-            s = tf.cast(tmp, tf.int32)
-            x = tf.cast(joints[i * 3], tf.float64)
-            y = tf.cast(joints[i * 3 + 1], tf.float64)
-
-            ht = tf.cond(
-                (tf.equal(joints[i * 3 + 2], 1.)),
-                lambda: self._makeGaussian(height, width, s,
-                                           center=(tf.cast(x, tf.int32), tf.cast(y, tf.int32))),
-                lambda: self.planB(height, width)
-            )
-            ht = tf.expand_dims(ht, -1)
-            hm.append(ht)
-
+    def generateHeatMap(self, center, scale ,height, width, joints, maxlenght, weight):
+        """ Generate a full Heap Map for every joints in an array
+        Args:
+            height			: Wanted Height for the Heat Map
+            width			: Wanted Width for the Heat Map
+            joints			: Array of Joints
+            maxlenght		: Lenght of the Bounding Box
+        """
+        joints = self.transformPreds(joints, center=center,scale=scale, res=[height,width])
+        num_joints = joints.shape[0]
+        hm = np.zeros((height, width, num_joints), dtype=np.float32)
+        for i in range(num_joints):
+            if not (np.array_equal(joints[i], [-1, -1])) and weight[i] == 1:
+                s = int(np.sqrt(maxlenght) * maxlenght * 10 / 4096) + 2
+                hm[:, :, i] = self._makeGaussian(height, width, sigma=s, center=(joints[i, 0], joints[i, 1]))
+            else:
+                hm[:, :, i] = np.zeros((height, width))
         return hm
+    def TensorflowBatch(self):
+        if self.isTrainging:
+            #train_img,train_mini, train_gtmap,
+            ds = tf.data.Dataset.from_generator(
+                self.get_batch_generator, (tf.float32, tf.float32, tf.float32,),(tf.TensorShape([256,256,3]),
+                                                                                 tf.TensorShape([64,64,3]),
+                                                                                 tf.TensorShape([64, 64, 14])
+                                                                                 ) )
+            ds = ds.batch(self.batch_size)
+            return ds.make_one_shot_iterator().get_next()
 
-    def read_and_decode(self, filepath, img_size=256, label_size=14, heatmap_size=64, flipping=False,
-                        color_jitting=True, rotate=30, batch_size=32, isvalid=False,root_img=""):
+    def get_batch_generator(self):
+        if self.isTrainging:
+            while True:
+                # train_img = np.zeros((self.batch_size, 256, 256, 3), dtype=np.float32)
+                # train_gtmap = np.zeros((self.batch_size,  64, 64, len(self.joints_name)), np.float32)
+                # train_weights = np.zeros((self.batch_size, len(self.joints_name)), np.float32)
+                # train_name = [None] * self.batch_size
+                # train_center = [None] * self.batch_size
+                # train_scale = [None] * self.batch_size
+                #
+                # i = 0
+                # while i < self.batch_size:
+                #     # try:
 
-        feature = {
-                   'label': tf.FixedLenFeature([], tf.string),
-                   'center': tf.FixedLenFeature([], tf.string),
-                   'h': tf.FixedLenFeature([], tf.int64),
-                   'w': tf.FixedLenFeature([], tf.int64),
-                   'bh': tf.FixedLenFeature([], tf.int64),
-                   'bw': tf.FixedLenFeature([], tf.int64),
+                name = random.choice(self.dataset)
 
-                   'img_name': tf.FixedLenFeature([], tf.string),
-                   }
-        img_name = feature['img_name']
-        filename_queue = tf.train.string_input_producer(
-            tf.train.match_filenames_once(img_name))
+                joints = self.data_dict[name]['joints']
+                box = self.data_dict[name]['box']
+                center,scale = self.getFeature(box)
+                weight = np.asarray(self.data_dict[name]['weights'])
+                # train_weights[i] = weight
+                img = self.open_img(name)
+                #
+                # train_name[i] = name[:-1]
+                # train_center[i] = center
+                # train_scale[i] = scale
+                #train_name = name[:-1]
+                train_center = center
+                train_scale = scale
+                crop_img = self.crop(img, center, scale, self.resize)
+                train_mini = cv2.resize(crop_img,(64,64))
+                hm = self.generateHeatMap(center, scale, 64, 64, joints, 64, weight)
+                ##still need augment
+                if self.normalize:
+                    train_img = crop_img.astype(np.float32) / 255
+                    train_mini = train_mini.astype(np.float32) / 255
 
-        # Read an entire image file which is required since they're JPEGs, if the images
-        # are too large they could be split in advance to smaller files or use the Fixed
-        # reader to split up the file.
-        image_reader = tf.WholeFileReader()
+                else:
+                    train_img = crop_img.astype(np.float32) / 255
 
-        # Read a whole file from the queue, the first returned value in the tuple is the
-        # filename which we are ignoring.
-        _, image_file = image_reader.read(filename_queue)
+                    train_mini = train_mini.astype(np.float32)
+                train_gtmap = hm
+                # i = i + 1
+                    # except:
+                    #     print('error file: ', name)
 
-        # Decode the image as a JPEG file, this will turn it into a Tensor which we can
-        # then use in training.
-        image = tf.image.decode_jpeg(image_file)
-
-        return image
-
-        # # Create a list of filenames and pass it to a queue
-        # file_lst = []
-        # for root, dirs, files in os.walk(filepath):
-        #     for name in files:
-        #         file_lst.append(os.path.join(root, name))
-
-
-
-        # filename_queue = tf.train.string_input_producer(file_lst)
-        # # Define a reader and read the next record
-        #
-        # reader = tf.TFRecordReader()
-        # _, serialized_example = reader.read(filename_queue)
-        #
-        # # Decode the record read by the reader
-        # features = tf.parse_single_example(serialized_example, features=feature)
-        # # Convert the image data from string back to the numbers
-        #
-        #
-        #
-        # center = tf.decode_raw(features['center'], tf.float32)
-        # center = tf.reshape(center, [2, ])
-        #
-        # label = tf.decode_raw(features['label'], tf.int32)
-        # label = tf.reshape(label, [label_size, 3])
-        # label = tf.cast(label, tf.float32)
-        #
-        # height = tf.cast(features['h'], tf.int32)
-        # width = tf.cast(features['w'], tf.int32)
-        #
-        # boxh = tf.cast(features['bh'], tf.int32)
-        #
-        # boxw = tf.cast(features['bw'], tf.int32)
-        #
-        # img = tf.decode_raw(features['img_raw'], tf.uint8)
-        #
-        # # Cast label data into int32
-        # # label = tf.cast(features['label'],tf.float32)
-        # # Reshape image data into the original shape
-        #
-        # img_name = features['img_name']
-        # res_256 = tf.constant([img_size, img_size], dtype=tf.float32)
-        # res_64 = tf.constant([heatmap_size, heatmap_size], dtype=tf.float32)
-        #
-        # # return center,boxh,boxw
-        #
-        #
-        #
-        #
-        # scale = tf.stack([boxh, boxw], axis=0)
-        # scale = tf.cast(scale, tf.float32)
-        # img = tf.reshape(img, [height, width, 3])
-        #
-        # crop_img = crop(img, height, width, center, scale, res_256, )
-        # crop_img.set_shape([img_size, img_size, 3])
-        #
-        # coord = transformPreds(coords=label[:, 0:2], center=center,
-        #                        scale=scale, res=res_64)
-        # coord = tf.squeeze(coord)
-        # label_exp = tf.expand_dims(label[:, -1], -1)
-        # coord = tf.squeeze(tf.reshape(tf.concat([coord, label_exp], axis=1), [-1, 1]))
-        # heatmap = self.generateHeatMap(heatmap_size, heatmap_size, coord, label_size, heatmap_size * 1.)
-        # repeat = []
-        # for i in range(len(heatmap)):
-        #     heatmap[i] = tf.squeeze(heatmap[i])
-        # heatmap = tf.stack(heatmap, axis=-1)
-        # for i in range(self.nstack):
-        #     repeat.append(heatmap)
-        # heatmap = tf.stack(repeat, axis=0)
-        # img_mini = tf.image.resize_images(crop_img,[64,64])
-        if batch_size:
-
-            min_after_dequeue = 10
-            capacity = min_after_dequeue + 4 * batch_size
-            return tf.train.shuffle_batch([crop_img, img_mini,heatmap, center, scale, img_name],
-                                          batch_size=batch_size,
-                                          num_threads=4,
-                                          capacity=capacity,
-                                          min_after_dequeue=min_after_dequeue)
-
+                yield train_img,train_mini, train_gtmap,
         else:
-            return img, label
+            while True:
+                train_img = np.zeros((self.batch_size, 256, 256, 3), dtype=np.float32)
+                train_gtmap = np.zeros((self.batch_size, 64, 64, len(self.joints_name)), np.float32)
+                train_weights = np.zeros((self.batch_size, len(self.joints_name)), np.float32)
+                train_name = [None] * self.batch_size
+                train_center = [None] * self.batch_size
+                train_scale = [None] * self.batch_size
+
+                i = 0
+                while i < self.batch_size:
+                    # try:
+
+                    name = random.choice(self.dataset)
+
+                    joints = self.data_dict[name]['joints']
+                    box = self.data_dict[name]['box']
+                    center, scale = self.getFeature(box)
+                    weight = np.asarray(self.data_dict[name]['weights'])
+                    train_weights[i] = weight
+                    img = self.open_img(name)
+
+                    train_name[i] = name[:-5]
+                    train_center[i] = center
+                    train_scale[i] = scale
+
+                    crop_img = self.crop(img, center, scale, self.resize)
+
+                    hm = self.generateHeatMap(center, scale, 64, 64, joints, 64, weight)
+                    ##still need augment
+                    if self.normalize:
+                        train_img[i] = crop_img.astype(np.float32) / 255
+                    else:
+                        train_img[i] = crop_img.astype(np.float32)
+                    train_gtmap[i] = hm
+                    i = i + 1
+                    # except:
+                    #     print('error file: ', name)
+                yield train_img, train_gtmap.astype(np.float32),  train_name, train_center, train_scale
+

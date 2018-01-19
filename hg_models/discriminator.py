@@ -11,7 +11,6 @@ class discrim():
 
     def hourglass(self,data, n, f, nModual, reuse=False, name=""):
 
-        # with mx.name.Prefix("%s_%s_" % (name, suffix)):
         with tf.variable_scope(name, reuse=reuse):
             pool = tl.layers.MaxPool2d(data, (2, 2), strides=(2, 2), name='pool1')
 
@@ -98,4 +97,4 @@ class discrim():
             fc_out[0] = conv_2d(ll[0], self.partnum, filter_size=(1, 1), strides=(1, 1),
                              name="dis_crim_stage_0_out" )
 
-        return fc_out[-1]
+        return fc_out[-1].outputs

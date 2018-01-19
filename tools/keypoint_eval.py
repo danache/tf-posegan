@@ -41,7 +41,7 @@ import pprint
 import numpy as np
 
 
-def load_annotations(anno_file, return_dict):
+def load_annotations(anno_file):
     """Convert annotation JSON file."""
 
     annotations = dict()
@@ -53,8 +53,9 @@ def load_annotations(anno_file, return_dict):
     try:
         annos = json.load(open(anno_file, 'r'))
     except Exception:
-        return_dict['error'] = 'Annotation file does not exist or is an invalid JSON file.'
-        exit(return_dict['error'])
+        exit(-1)
+        # return_dict['error'] = 'Annotation file does not exist or is an invalid JSON file.'
+        # exit(return_dict['error'])
 
     for anno in annos:
         annotations['image_ids'].add(anno['image_id'])
@@ -132,7 +133,7 @@ def compute_oks(anno, predict, delta):
 
     return oks
 
-def keypoint_eval(predictions, annotations, return_dict):
+def keypoint_eval(predictions, annotations):
     oks_all = []
     oks_num = 0
 
@@ -152,9 +153,10 @@ def keypoint_eval(predictions, annotations, return_dict):
 
             # accumulate total num by max(gtN,pN)
             oks_num += 1  # np.max(oks.shape)
-        else:
+        # else:
+
             # otherwise report warning
-            return_dict['warning'].append(image_id + ' is not in the prediction JSON file.')
+            #return_dict['warning'].append(image_id + ' is not in the prediction JSON file.')
             # # number of humen in ground truth annotations
             # gt_n = len(annotations['annos'][image_id]['human_annos'].keys())
             # # fill 0 in oks scores
@@ -165,11 +167,12 @@ def keypoint_eval(predictions, annotations, return_dict):
     # compute mAP by APs under different oks thresholds
     average_precision = []
     oks_all = np.array(oks_all)
-    for threshold in np.linspace(0.5, 0.95, 10):
-        average_precision.append(np.sum(oks_all > threshold) / np.float32(oks_num))
-    return_dict['score'] = np.mean(average_precision)
+    # for threshold in np.linspace(0.1, 0.5, 10):
+    #     average_precision.append(np.sum(oks_all > threshold) / np.float32(oks_num))
+    average_precision.append(np.sum(oks_all > 0.5) / np.float32(oks_num))
+    # return_dict['score'] = np.mean(average_precision)
 
-    return return_dict
+    return np.mean(average_precision)#return_dict
 def keypoint_eval_mul(predictions, annotations, return_dict):
     """Evaluate predicted_file and return mAP."""
 
@@ -211,12 +214,12 @@ def keypoint_eval_mul(predictions, annotations, return_dict):
     return return_dict
 
 
-def getScore(predictions, anno,return_dict):
+def getScore(predictions, anno):
 
-    return_dict = keypoint_eval(predictions=predictions,
-                                annotations=anno,
-                                return_dict=return_dict)
-    return return_dict['score']
+    score = keypoint_eval(predictions=predictions,
+                                annotations=anno
+                               )
+    return score
 def main():
     """The evaluator."""
 

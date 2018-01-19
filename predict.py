@@ -1,12 +1,9 @@
-import time
 import sys
 sys.path.append(sys.path[0])
 del sys.path[0]
 import configparser
-from dataGenerator.datagen import DataGenerator
 import tensorflow as tf
 from hg_models.hg import hgmodel
-from train_class import train_class
 from predict_class import test_class
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"

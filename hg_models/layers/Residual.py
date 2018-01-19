@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorlayer as tl
-from tensorlayer.layers import Conv2d as conv_2d
+from hg_models.layers.Auxlayer import conv_2d
 
 def convBlock(data,numIN, numOut, name = "",reuse=False):
     with tf.variable_scope(name,reuse=reuse):

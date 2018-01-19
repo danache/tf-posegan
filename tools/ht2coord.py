@@ -16,7 +16,7 @@ def getjointcoord(coord, img_name,predictions,thresh=0):
 
 
 
-        name = img_name[batch].decode("utf-8")
+        name = img_name[batch]
         #
         # img_path = os.path.join(img_dir, name + ".jpg")
         # img = cv2.imread(img_path)
@@ -78,7 +78,7 @@ def getjointcoord2(heatmap, image_size, image_name,predictions,inputsize = 64,th
 
         res[:, 0] = res[:, 0] * w_ratio + x1
         res[:, 1] = res[:, 1] * h_ratio + y1
-        name = image_name[batch].decode("utf-8")
+        name = image_name[batch]
         #
         # img_path = os.path.join(img_dir, name + ".jpg")
         # img = cv2.imread(img_path)
