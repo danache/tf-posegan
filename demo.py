@@ -3,7 +3,9 @@ import configparser
 
 from dataGenerator.datagen_test import DataGenerator
 from hg_models.ian_hourglass import hourglassnet
-from train_class_HG_Feed import train_class
+
+from old.train_class_HG_Feed import train_class
+
 
 
 def process_config(conf_file):

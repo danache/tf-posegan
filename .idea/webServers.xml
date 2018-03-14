@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="2e21278b-92e5-4733-8218-5ec66ee145b2" name="gan" url="http://10.108.102.114">
+        <fileTransfer host="10.108.102.114" port="22" rootFolder="/home/bnrc2/mu/tf-posegan" accessType="SFTP">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" />
+          </advancedOptions>
+          <option name="port" value="22" />
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

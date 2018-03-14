@@ -3,13 +3,16 @@ import numpy as np
 import os
 import random
 import scipy.misc as scm
-import scipy
+
 import cv2
 import tensorflow as tf
 import scipy
 class DataGenerator():
     def __init__(self, imgdir=None, txt=None,  resize=256, scale=0.25,normalize=True,flipping=False,color_jitting=30,
-                 rotate=30, batch_size=32,  is_aug=False,randomize=True,joints_name=None,datasetname="train",isTraing=True):
+
+                 rotate=30, batch_size=32,  is_aug=False,randomize=True,joints_name=None,datasetname="train",isTraing=True,
+                 pixel_mean = np.array([[[102.9801,115.9465,122.7717]]])):
+
 
         self.joints_name = joints_name
         self.letter = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N']
@@ -21,6 +24,10 @@ class DataGenerator():
         self.normalize = normalize
         self.batch_size = batch_size
         self.joints_name = joints_name
+
+        self.is_aug = is_aug
+        self.partnum = len(self.joints_name)
+
         if is_aug:
             self.flipping = flipping
             self.color_jitting = color_jitting
@@ -32,6 +39,9 @@ class DataGenerator():
         self.resize = [resize,resize]
         self.res = [64,64]
         self.isTrainging = isTraing
+
+        self.pixel_means = pixel_mean
+
         self.creatset()
 
     def load_data(self):
@@ -145,6 +155,62 @@ class DataGenerator():
         return center, scale
 
 
+    def flip_data(self,img,miniimg, annot):
+        n = annot.shape[0]
+        newimg = cv2.flip(img, 1)
+        new_mini = cv2.flip(miniimg, 1)
+
+        width = newimg.shape[1]
+        height = newimg.shape[0]
+        cod = [];
+        for i in range(n):
+            x, y = annot[i][0], annot[i][1]
+            if x >= 0:
+                x = width - 1 - x
+            cod.append((x, y))
+        # threshold judgment，if overflow,set to -1
+        res = np.vstack(cod)
+        for i in range(0, res.shape[0]):
+            if res[i, 0] > width or res[i, 1] > height or res[i, 0] < 0 or res[i, 1] < 0:
+                res[i, 0] = -1
+                res[i, 1] = -1
+        return newimg, new_mini,res
+
+    def rotImg(self,img,mini, annot):
+        height, width = img.shape[0], img.shape[1]
+
+        mini_height,mini_width = mini.shape[0],mini.shape[1]
+        minicenter = mini_width // 2, mini_height // 2
+
+        center = width // 2, height // 2
+        angle = random.uniform(0, 45)
+        if random.randint(0, 1):
+            angle *= -1
+        rotMat = cv2.getRotationMatrix2D(center, angle, 1.0)
+        newimg = cv2.warpAffine(img, rotMat, (width, height))
+
+        minirotmat = cv2.getRotationMatrix2D(minicenter, angle, 1.0)
+        newmini = cv2.warpAffine(mini, minirotmat, (mini_width, mini_height))
+        allc = []
+
+        for i in range(annot.shape[0]):
+            x, y = annot[i][0], annot[i][1]
+            coor = np.array([x, y])
+
+            if x >= 0 and y >= 0:
+                R = rotMat[:, : 2]
+                W = np.array([rotMat[0][2], rotMat[1][2]])
+                coor = np.dot(R, coor) + W
+            allc.append(coor)
+        res = np.vstack(allc)
+        # threshold judgment，if overflow,set to -1
+        for i in range(0, res.shape[0]):
+            if res[i, 0] >= width or res[i, 1] >= height or res[i, 0] <= 0 or res[i, 1] <= 0:
+                res[i, 0] = -1
+                res[i, 1] = -1
+        return newimg,newmini, res
+
+
     def recoverFromHm(self, hm,center,scale):
         res = []
         for nbatch in range(hm.shape[0]):
@@ -170,7 +236,47 @@ class DataGenerator():
             y0 = center[1]
         return np.exp(-4 * np.log(2) * ((x - x0) ** 2 + (y - y0) ** 2) / sigma ** 2)
 
-    def generateHeatMap(self, center, scale ,height, width, joints, maxlenght, weight):
+
+    # def generateHeatMap(self, center, scale ,height, width, joints, maxlenght, weight):
+    #     """ Generate a full Heap Map for every joints in an array
+    #     Args:
+    #         height			: Wanted Height for the Heat Map
+    #         width			: Wanted Width for the Heat Map
+    #         joints			: Array of Joints
+    #         maxlenght		: Lenght of the Bounding Box
+    #     """
+    #     joints = self.transformPreds(joints, center=center,scale=scale, res=[height,width])
+    #     num_joints = joints.shape[0]
+    #     hm = np.zeros((height, width, num_joints), dtype=np.float32)
+    #     for i in range(num_joints):
+    #         if not (np.array_equal(joints[i], [-1, -1])) and weight[i] == 1:
+    #             s = int(np.sqrt(maxlenght) * maxlenght * 10 / 4096) + 2
+    #             hm[:, :, i] = self._makeGaussian(height, width, sigma=s, center=(joints[i, 0], joints[i, 1]))
+    #         else:
+    #             hm[:, :, i] = np.zeros((height, width))
+    #     return hm
+    # def augment(self,img,train_mini,hm):
+    #
+    #     rand = random.randint(0, 4) % 2
+    #     if rand == 0:
+    #         aug = [iaa.Noop()]
+    #     elif rand == 1:
+    #         aug = [iaa.Fliplr(1)]
+    #
+    #     seq = iaa.Sequential(aug)
+    #     images = [img,train_mini]
+    #     for num in range(self.partnum):
+    #         images.append(hm[:,:,num].transpose(1,0))
+    #     images_aug = seq.augment_images(images)
+    #
+    #     crop_img = images_aug[0]
+    #     mini = images_aug[1]
+    #     shm = np.transpose(np.stack(images_aug[2:], -1),[1,0,2])
+    #
+    #     return crop_img, mini,shm
+
+    def generateHeatMap(self, center, scale, height, width, joints, maxlenght, weight):
+
         """ Generate a full Heap Map for every joints in an array
         Args:
             height			: Wanted Height for the Heat Map
@@ -178,15 +284,27 @@ class DataGenerator():
             joints			: Array of Joints
             maxlenght		: Lenght of the Bounding Box
         """
-        joints = self.transformPreds(joints, center=center,scale=scale, res=[height,width])
+
+        #joints = self.transformPreds(joints, center=center, scale=scale, res=[height, width])
+        joints = np.divide(joints,4).astype(int)
         num_joints = joints.shape[0]
-        hm = np.zeros((height, width, num_joints), dtype=np.float32)
+        hm = np.zeros((height, width ,num_joints), dtype=np.float32)
         for i in range(num_joints):
-            if not (np.array_equal(joints[i], [-1, -1])) and weight[i] == 1:
-                s = int(np.sqrt(maxlenght) * maxlenght * 10 / 4096) + 2
-                hm[:, :, i] = self._makeGaussian(height, width, sigma=s, center=(joints[i, 0], joints[i, 1]))
+            if joints[i][0] <= 0 or joints[i][1] <= 0 or joints[i][0] >= height or joints[i][1] >= width:
+                continue
             else:
-                hm[:, :, i] = np.zeros((height, width))
+                joints[i, 0] = min(joints[i,0], self.resize[0] - 1)
+                joints[i, 1] = min(joints[i, 1], self.resize[1] - 1)
+
+                hm[joints[i,1], joints[i,0],i ] = 1 #?????????????
+        for i in range(num_joints):
+            hm[:,:,i] = cv2.GaussianBlur(hm[:,:,i],(7,7),0)
+        for i in range(num_joints):
+            am = np.amax(hm[:,:,i])
+            if am <= 1e-8:
+                continue
+            hm[:,:,i] /= am / 255
+
         return hm
     def TensorflowBatch(self):
         if self.isTrainging:
@@ -216,11 +334,13 @@ class DataGenerator():
                 name = random.choice(self.dataset)
 
                 joints = self.data_dict[name]['joints']
+
                 box = self.data_dict[name]['box']
                 center,scale = self.getFeature(box)
                 weight = np.asarray(self.data_dict[name]['weights'])
                 # train_weights[i] = weight
                 img = self.open_img(name)
+
                 #
                 # train_name[i] = name[:-1]
                 # train_center[i] = center
@@ -230,14 +350,37 @@ class DataGenerator():
                 train_scale = scale
                 crop_img = self.crop(img, center, scale, self.resize)
                 train_mini = cv2.resize(crop_img,(64,64))
-                hm = self.generateHeatMap(center, scale, 64, 64, joints, 64, weight)
+
+
+                crop_coord =  self.transformPreds(joints, center=center, scale=scale, res=self.resize)
+                rand = random.randint(0, 4)
+                if rand == 0:
+                    continue
+                elif rand == 1:
+
+                    crop_img, train_mini,crop_coord = self.flip_data(crop_img,train_mini, crop_coord)
+                elif rand == 2 or rand == 3:
+                    crop_img,train_mini, crop_coord = self.rotImg(crop_img,train_mini, crop_coord)
+
+
+                hm = self.generateHeatMap(center, scale, 64, 64, crop_coord, 64, weight)
+
+                # if self.is_aug:
+                #     crop_img, train_mini, hm = self.augment(crop_img,train_mini,hm)
+
+                crop_img = (crop_img.astype(np.float64) - self.pixel_means)
+                train_mini = (train_mini.astype(np.float64) - self.pixel_means)
+
+
                 ##still need augment
                 if self.normalize:
                     train_img = crop_img.astype(np.float32) / 255
                     train_mini = train_mini.astype(np.float32) / 255
 
                 else:
-                    train_img = crop_img.astype(np.float32) / 255
+
+                    train_img = crop_img.astype(np.float32)
+
 
                     train_mini = train_mini.astype(np.float32)
                 train_gtmap = hm
@@ -275,6 +418,12 @@ class DataGenerator():
                     crop_img = self.crop(img, center, scale, self.resize)
 
                     hm = self.generateHeatMap(center, scale, 64, 64, joints, 64, weight)
+
+
+                    if self.is_aug:
+                        crop_img, hm = self.augment(crop_img, hm)
+                    crop_img = (crop_img.astype(np.float64) - self.pixel_means)
+
                     ##still need augment
                     if self.normalize:
                         train_img[i] = crop_img.astype(np.float32) / 255

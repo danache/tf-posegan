@@ -112,6 +112,7 @@ class train_class():
         hg_flag = False
         self.K = tf.Variable(0., trainable=False, dtype=tf.float32, )
 
+
         ###### data list ######
         self.train_img_lst = []
         self.train_img_mini_lst = []
@@ -138,8 +139,7 @@ class train_class():
 
 
         with tf.variable_scope(tf.get_variable_scope()) as vscope:
-            print("GPU??????????")
-            print(self.gpu)
+
             for i in range(len(self.gpu)):
                 print("/gpu:%d" % self.gpu[i])
                 with tf.device(("/gpu:%d" % self.gpu[i])):
@@ -180,10 +180,9 @@ class train_class():
                         ####### generate plot heatmap ########
 
                         with tf.name_scope('train_heatmap'):
-                            train_im = self.train_img_lst[i][n, :, :, :]
-                            train_im = tf.expand_dims(train_im, 0)
 
-                            tf.summary.image(name=('origin_train_img'), tensor=train_im, collections=['train'])
+                            train_im = self.train_img_mini_lst[i][n, :, :, :]
+                            train_im = tf.expand_dims(train_im, 0)
 
                             tout = []
                             tgt = []
@@ -210,11 +209,17 @@ class train_class():
                             train_gt = tf.add_n(tgt)
 
                             train_gt = tf.expand_dims(train_gt, 0)
-                            train_gt = tf.expand_dims(train_gt, -1)
                             train_hm= tf.add_n(tout)
 
                             train_hm = tf.expand_dims(train_hm, 0)
                             train_hm = tf.expand_dims(train_hm, -1)
+
+                            repeat = [train_gt,train_gt,train_gt]
+                            train_tmp_img = tf.add(train_im,tf.stack(repeat,3))
+                            train_gt= tf.expand_dims(train_gt, -1)
+                            tf.summary.image(name=('origin_train_img'), tensor=train_tmp_img, collections=['train'])
+
+
                             tf.summary.image('train_ground_truth', tensor=train_gt, collections=['train'])
                             tf.summary.image('train_heatmp', train_hm, collections=['train'])
 
@@ -239,8 +244,10 @@ class train_class():
 
                         ### concat generator output and miniimg###
 
+
                         self.concat_generator_heatmap.append(tf.concat([self.generator_output[i][-1],
                                                                         self.train_img_mini_lst[i]], axis=-1,) )
+
 
                         #### foward propogation ###
                         self.discriminator_generator_output.append(self.model.discrim
@@ -328,6 +335,7 @@ class train_class():
 
                     vout.append(self.valid_output[n, :,:,i])
                     vgt.append(self.valid_ht[n,:,:, i])
+
                 val_hm = tf.add_n(vout)
                 val_gt = tf.add_n(vgt)
 
@@ -405,6 +413,7 @@ class train_class():
             img_valid, gt_valid, name_valid, center_valid, scale_valid = next(
                 self.valid_gen)
 
+
             val_percent = ((v + 1) / self.val_batch_num) * 100
             val_num = np.int(20 * val_percent / 100)
             val_tToEpoch = int((time.time() - val_begin) * (100 - val_percent) / (val_percent))
@@ -420,6 +429,7 @@ class train_class():
                                                           scale=scale_valid)
             valid_predictions = getjointcoord(vadli_coord, name_valid, valid_predictions)
 
+
         score = getScore(valid_predictions, valid_anno)
         print("________________________________")
         print("score = " + str(score))
@@ -434,6 +444,8 @@ class train_class():
             self.valid_gen = self.valid_record.get_batch_generator()
             self.valid_writer = tf.summary.FileWriter(self.logdir_valid)
 
+
+            valid_anno = load_annotations(self.val_label)
 
             valid_anno = load_annotations(self.val_label)
 

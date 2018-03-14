@@ -6,6 +6,9 @@ import tensorflow as tf
 from hg_models.hg import hgmodel
 from predict_class import test_class
 import os
+
+from hg_models.ian_hourglass import hourglassnet
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 def process_config(conf_file):
     params = {}
@@ -62,17 +65,21 @@ if __name__ == '__main__':
     #                            params['scale'])
 
 
-    model = hgmodel()
+
+    model = hourglassnet()
+
 
 
     test = test_class(model=model, nstack=network_params['nstack'],
                          test_json="/home/bnrc2/mu/deepcut-pose/python/ly.csv",
-                              resume=params['resume'],#/media/bnrc2/_backup/golf/model/tiny_hourglass_21
+
+                              resume="/media/bnrc2/_backup/models/gan2gpu/gan_2",
+
                               gpu=[0],partnum=network_params['partnum'],
                              )
 
     test.generateModel()
     test.test_init(img_path="/home/bnrc2/mu/deepcut-pose/python/ly_resize",
-                   save_dir="/home/bnrc2/mu/deepcut-pose/python/lygan")
 
-
+                   save_dir="/home/bnrc2/mu/data/312/",
+                   )

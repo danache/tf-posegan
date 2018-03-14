@@ -41,7 +41,9 @@ class test_class():
         # self.train_num = test_data.getN()
         # self.test_img, test_ht, self.test_size, self.test_name = test_data.getData()
         self.test_img = tf.placeholder(tf.float32,shape=[None,256,256,3])
-        self.test_out = self.model.createModel(inputs=self.test_img,reuse=False).outputs
+
+        self.test_out = self.model.build(self.test_img)
+
 
         #self.train_output = self.model(train_img)
 
@@ -108,15 +110,19 @@ class test_class():
                 img_padd[:, left:right, :] = img_reshape
             img_padd_tf= np.expand_dims(img_padd,0)
             hg = self.Session.run(self.test_out,feed_dict={self.test_img:img_padd_tf})
-            htmap = hg[0,3]
+
+            htmap = hg[-1]
+
             res = np.ones(shape=(14, 3)) * -1
 
 
             for joint in range(14):
                 idx = np.unravel_index(htmap[ :, :, joint].argmax(), (64, 64))
                 tmp_idx = np.asarray(idx) * 4
-                res[joint][0] = tmp_idx[1]
-                res[joint][1] = tmp_idx[0]
+
+                res[joint][0] = tmp_idx[0]
+                res[joint][1] = tmp_idx[1]
+
 
             for i in range(14):
                 cv2.circle(img_padd, (int(res[i][0]), int(res[i][1])), 5, self.colors[i], -1)
@@ -127,4 +133,4 @@ class test_class():
         self.coord.request_stop()
         self.coord.join(self.threads)
         self.Session.close()
-        print('Training Done')
+        print('Test Done')
